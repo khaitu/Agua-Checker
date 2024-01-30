@@ -1,3 +1,4 @@
+import { spawnSync } from 'child_process';
 import https from 'https';
 import { createReadStream, createWriteStream } from 'fs';
 import { readFile, stat, unlink, writeFile } from 'fs/promises';
@@ -6,7 +7,8 @@ import puppeteer from 'puppeteer-core';
 import { Telegraf } from 'telegraf';
 import chalk from 'chalk';
 
-const kMacOSChromePath = '/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome';
+const kSnapChromePath = '/snap/bin/chromium';
+const kMacOSChromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const kFacebookPage = 'https://www.facebook.com/SOAPA.Oax';
 const kFacebookScrollLimit = 5;
 const kTempImage = './fb-post-image.jpeg';
@@ -14,7 +16,7 @@ const kHistoryFile = './history.json';
 const kDateRegex = /[0-9]{1,2}\sde\s[A-Za-z]+\sde\s[0-9]{4}/;
 const kHeadingRegex = /^[A-Z\-\s]+$/;
 const kBulletRegex = /^[«\-“]\s?/;
-const kConfidenceThreshold = 40;
+const kConfidenceThreshold = 30;
 const kBaselineVariance = 40;
 
 class FacebookError extends Error {}
@@ -90,7 +92,8 @@ async function parseText (image) {
 };
 
 async function getLatestPost () {
-  const browser = await puppeteer.launch({ executablePath: kMacOSChromePath });
+  const path = process.platform == 'darwin' ? kMacOSChromePath : kSnapChromePath;
+  const browser = await puppeteer.launch({ executablePath: path });
   const page = await browser.newPage();
   let hasPost = false;
   let scrolls = 0;
@@ -108,15 +111,17 @@ async function getLatestPost () {
   // scroll down to update post
   while (!hasPost && scrolls++ < kFacebookScrollLimit) {
     await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+    await page.waitForNetworkIdle();
 
     hasPost = await page.evaluate(() => document.body.textContent.includes('#HoyLlegaElAgua'));
   }
 
   if (!hasPost) {
+    await page.screenshot({path: 'screenshot.png'});
+
     throw new FacebookError();
   }
 
-  // await page.screenshot({path: 'screenshot.png'});
 
   const imageUrl = await page.$$eval(
     '[role="article"]',
