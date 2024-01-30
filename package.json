@@ -1,0 +1,16 @@
+{
+  "name": "AguaBot",
+  "version": "1.0.0",
+  "description": "Telegram Water Notifier",
+  "main": "index.js",
+  "author": "khaitu",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "node-horseman": "^3.3.0",
+    "puppeteer-core": "^21.10.0",
+    "telegraf": "^4.15.3",
+    "tesseract.js": "^5.0.4"
+  }
+}
