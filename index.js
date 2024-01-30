@@ -10,7 +10,7 @@ import chalk from 'chalk';
 const kSnapChromePath = '/snap/bin/chromium';
 const kMacOSChromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const kFacebookPage = 'https://www.facebook.com/SOAPA.Oax';
-const kFacebookScrollLimit = 5;
+const kFacebookScrollLimit = 10;
 const kTempImage = './fb-post-image.jpeg';
 const kHistoryFile = './history.json';
 const kDateRegex = /[0-9]{1,2}\sde\s[A-Za-z]+\sde\s[0-9]{4}/;
