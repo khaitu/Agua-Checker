@@ -30,7 +30,8 @@ async function parseText (image) {
   const worker = await createWorker('spa');
   const result = await worker.recognize(image);
 
-  let parsed = result.data.paragraphs[0].lines
+  let parsed = result.data.paragraphs
+    .reduce((acc, paragraph) => [...acc, ...paragraph.lines], [])
     .filter(line => line.confidence > kConfidenceThreshold)
     .map(line => ({
       text: line.text.replace(/^[\s\n]*|[\s\n]+$/g, ''),
@@ -95,44 +96,54 @@ async function getLatestPost () {
   const path = process.platform == 'darwin' ? kMacOSChromePath : kSnapChromePath;
   const browser = await puppeteer.launch({ executablePath: path });
   const page = await browser.newPage();
-  let hasPost = false;
-  let scrolls = 0;
 
-  await page.setViewport({ width: 1024, height: 2000 });
+  try {
+    let hasPost = false;
+    let scrolls = 0;
 
-  await page.goto(kFacebookPage);
+    await page.setViewport({ width: 1024, height: 2000 });
 
-  await page.waitForSelector('[role="article"]');
+    if (process.env.UA_AGENT) {
+      await page.setUserAgent(process.env.UA_AGENT);
+    }
 
-  await page.click('[role="dialog"] [role="button"]');
+    await page.goto(kFacebookPage);
 
-  await page.waitForNetworkIdle();
+    await page.waitForSelector('[role="article"]');
 
-  // scroll down to update post
-  while (!hasPost && scrolls++ < kFacebookScrollLimit) {
-    await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+    await page.click('[role="dialog"] [role="button"]');
+
     await page.waitForNetworkIdle();
 
-    hasPost = await page.evaluate(() => document.body.textContent.includes('#HoyLlegaElAgua'));
-  }
+    // scroll down to update post
+    while (!hasPost && scrolls++ < kFacebookScrollLimit) {
+      await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+      await page.waitForNetworkIdle();
 
-  if (!hasPost) {
+      hasPost = await page.evaluate(() => document.body.textContent.includes('#HoyLlegaElAgua'));
+    }
+
+    if (!hasPost) {
+      throw new FacebookError();
+    }
+
+    const imageUrl = await page.$$eval(
+      '[role="article"]',
+      blocks => blocks
+        .find(block => block.textContent.includes('#HoyLlegaElAgua'))
+        .querySelector('a img').src
+      );
+
+    await browser.close();
+
+    return imageUrl;
+  } catch (err) {
     await page.screenshot({path: 'screenshot.png'});
 
-    throw new FacebookError();
+    await browser.close();
+
+    throw err;
   }
-
-
-  const imageUrl = await page.$$eval(
-    '[role="article"]',
-    blocks => blocks
-      .find(block => block.textContent.includes('#HoyLlegaElAgua'))
-      .querySelector('a img').src
-    );
-
-  await browser.close();
-
-  return imageUrl;
 }
 
 async function downloadImage (imageUrl) {
