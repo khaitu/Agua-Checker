@@ -1,5 +1,5 @@
 import { spawnSync } from 'child_process';
-import https from 'https';
+import * as https from 'https';
 import { createReadStream, createWriteStream } from 'fs';
 import { readFile, stat, unlink, writeFile } from 'fs/promises';
 import { createWorker } from 'tesseract.js';
@@ -19,25 +19,52 @@ const kBulletRegex = /^[«\-“]\s?/;
 const kConfidenceThreshold = 30;
 const kBaselineVariance = 40;
 
+interface History {
+  history: string[];
+}
+
+interface TesseractLine {
+  text: string;
+  confidence: number;
+  baseline: TesseractBaseline;
+}
+
+interface TesseractBaseline {
+  x0: number;
+}
+
+interface ParsedOCR {
+  text: string;
+  xBaseline: number;
+}
+
+type DownloadResponseType = { pipe: Function };
+
 class FacebookError extends Error {}
 class TelegramError extends Error {}
 class OCRError extends Error {}
 class DownloadError extends Error {}
-class DuplicateError extends Error{}
-class HistoryError extends Error{}
+class DuplicateError extends Error {}
+class HistoryError extends Error {}
 
-async function parseText (image) {
+async function parseText(image: string) {
   const worker = await createWorker('spa');
   const result = await worker.recognize(image);
 
-  let parsed = result.data.paragraphs
-    .reduce((acc, paragraph) => [...acc, ...paragraph.lines], [])
+  let parsed: ParsedOCR[] = result.data.paragraphs
+    .reduce(
+      (acc, paragraph): TesseractLine[] => [...acc, ...paragraph.lines],
+      [] as TesseractLine[],
+    )
     .filter(line => line.confidence > kConfidenceThreshold)
-    .map(line => ({
-      text: line.text.replace(/^[\s\n]*|[\s\n]+$/g, ''),
-      xBaseline: line.baseline.x0,
-    }))
-    .filter(line => !line.text.match(/^\s*$/));
+    .map(
+      line =>
+        ({
+          text: line.text.replace(/^[\s\n]*|[\s\n]+$/g, ''),
+          xBaseline: line.baseline.x0,
+        }) as ParsedOCR,
+    )
+    .filter((line: ParsedOCR) => !line.text.match(/^\s*$/));
 
   // trim everything up to date
   while (parsed.length && !kDateRegex.test(parsed[0].text)) {
@@ -53,8 +80,9 @@ async function parseText (image) {
     isDate = kDateRegex.test(parsed[i].text);
     isHeading = kHeadingRegex.test(parsed[i].text);
 
-    if (!isDate && !isHeading) { // bullet
-      if (firstBulletXBaseline === undefined ) {
+    if (!isDate && !isHeading) {
+      // bullet
+      if (firstBulletXBaseline === undefined) {
         firstBulletXBaseline = parsed[i].xBaseline;
       }
 
@@ -64,7 +92,8 @@ async function parseText (image) {
       } else {
         parsed.splice(i--, 1);
       }
-    } else if (isHeading) { // heading
+    } else if (isHeading) {
+      // heading
       if (!parsed[i].text.includes('TURNO')) {
         if (firstHeadingXBaseline == undefined) {
           firstHeadingXBaseline = parsed[i].xBaseline;
@@ -76,7 +105,10 @@ async function parseText (image) {
           parsed.splice(i--, 1);
         }
       } else {
-        turn = parsed[i].text.replace(/^TURNO\s?/, '').replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase();
+        turn = parsed[i].text
+          .replace(/^TURNO\s?/, '')
+          .replace(/[^a-zA-Z0-9]+/g, '-')
+          .toLowerCase();
       }
     } else if (isDate) {
       date = parsed[i].text.replace(/[^a-zA-Z0-9]+/g, '-');
@@ -90,9 +122,9 @@ async function parseText (image) {
   await worker.terminate();
 
   return { id: `${date}-${turn || 'unknown'}`, text: text };
-};
+}
 
-async function getLatestPost () {
+async function getLatestPost(): Promise<string> {
   const path = process.platform == 'darwin' ? kMacOSChromePath : kSnapChromePath;
   const browser = await puppeteer.launch({ executablePath: path });
   const page = await browser.newPage();
@@ -120,25 +152,27 @@ async function getLatestPost () {
       await page.evaluate(() => window.scrollBy(0, window.innerHeight));
       await page.waitForNetworkIdle();
 
-      hasPost = await page.evaluate(() => document.body.textContent.includes('#HoyLlegaElAgua'));
+      hasPost = await page.evaluate(() => {
+        return document.body.textContent?.includes('#HoyLlegaElAgua') ?? false;
+      });
     }
 
-    if (!hasPost) {
-      throw new FacebookError();
-    }
+    if (!hasPost) throw new FacebookError();
 
-    const imageUrl = await page.$$eval(
-      '[role="article"]',
-      blocks => blocks
-        .find(block => block.textContent.includes('#HoyLlegaElAgua'))
-        .querySelector('a img').src
-      );
+    const imageUrl = await page.$$eval('[role="article"]', blocks => {
+      const post = blocks.find(block => block.textContent?.includes('#HoyLlegaElAgua'));
+      const image = post ? post.querySelector('a img') : null;
+
+      if (!image) throw new FacebookError();
+
+      return image.getAttribute('src') as string;
+    });
 
     await browser.close();
 
     return imageUrl;
   } catch (err) {
-    await page.screenshot({path: 'screenshot.png'});
+    await page.screenshot({ path: 'screenshot.png' });
 
     await browser.close();
 
@@ -146,33 +180,35 @@ async function getLatestPost () {
   }
 }
 
-async function downloadImage (imageUrl) {
+async function downloadImage(imageUrl: string): Promise<string> {
   const file = createWriteStream(kTempImage);
 
   return new Promise((resolve, reject) => {
-    https.get(imageUrl, response => {
-      response.pipe(file);
+    https
+      .get(imageUrl, (response: DownloadResponseType) => {
+        response.pipe(file);
 
-      file.on('finish', () => {
-        file.close();
+        file.on('finish', () => {
+          file.close();
 
-        resolve(kTempImage);
+          resolve(kTempImage);
+        });
+      })
+      .on('error', async (err: Error) => {
+        await unlink(kTempImage);
+
+        reject(new DownloadError());
       });
-    }).on('error', async err => {
-      await unlink(kTempImage);
-
-      reject(new DownloadError());
-    });
   });
 }
 
-async function postToTelegram (text) {
+async function postToTelegram(text: string) {
   try {
-    const bot = new Telegraf(process.env.TELEGRAM_TOKEN)
+    const bot = new Telegraf(process.env.TELEGRAM_TOKEN as string);
 
     bot.launch();
 
-    await bot.telegram.sendMessage('@agua_oaxaca', text)
+    await bot.telegram.sendMessage('@agua_oaxaca', text);
 
     bot.stop();
   } catch (err) {
@@ -180,7 +216,7 @@ async function postToTelegram (text) {
   }
 }
 
-async function verifyExisting(id) {
+async function verifyExisting(id: string) {
   try {
     await stat(kHistoryFile);
   } catch (err) {
@@ -194,7 +230,7 @@ async function verifyExisting(id) {
   }
 }
 
-async function recordNotification(id) {
+async function recordNotification(id: string) {
   try {
     const json = await readHistory();
 
@@ -208,11 +244,11 @@ async function recordNotification(id) {
   }
 }
 
-async function readHistory() {
+async function readHistory(): Promise<History> {
   try {
     let content = await readFile(kHistoryFile, 'utf8');
 
-    return JSON.parse(content);
+    return JSON.parse(content) as History;
   } catch (err) {
     throw err;
   }
