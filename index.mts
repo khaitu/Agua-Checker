@@ -206,11 +206,7 @@ async function postToTelegram(text: string) {
   try {
     const bot = new Telegraf(process.env.TELEGRAM_TOKEN as string);
 
-    bot.launch();
-
     await bot.telegram.sendMessage('@agua_oaxaca', text);
-
-    bot.stop();
   } catch (err) {
     throw new TelegramError();
   }

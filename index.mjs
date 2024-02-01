@@ -154,9 +154,7 @@ async function downloadImage(imageUrl) {
 async function postToTelegram(text) {
     try {
         const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
-        bot.launch();
         await bot.telegram.sendMessage('@agua_oaxaca', text);
-        bot.stop();
     }
     catch (err) {
         throw new TelegramError();
